@@ -6,7 +6,7 @@
 #![no_std]
 
 mod multisig;
-use multisig::{MultiSig, MultiSigConfig};
+use multisig::MultiSig;
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env,
     String, Symbol, Vec,
@@ -62,6 +62,23 @@ pub struct UpgradeEvent {
     pub version: u32,
     /// Ledger timestamp when the upgrade was executed.
     pub timestamp: u64,
+}
+
+/// Canonical read model for a multisig upgrade proposal.
+///
+/// Approval and execution status remain in [`MultiSig`], while upgrade-specific
+/// metadata is stored in instance storage under the same stable `proposal_id`.
+/// `proposer` is optional to preserve compatibility with older proposal rows
+/// that predate explicit proposer storage.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpgradeProposalRecord {
+    /// Stable multisig proposal identifier returned by `propose_upgrade`.
+    pub proposal_id: u64,
+    /// Address that created the proposal, when explicitly recorded.
+    pub proposer: Option<Address>,
+    /// WASM hash that will be installed if the proposal executes.
+    pub wasm_hash: BytesN<32>,
 }
 
 // ==================== MONITORING MODULE ====================
@@ -495,6 +512,12 @@ enum DataKey {
     /// WASM hash stored per proposal (for multisig upgrades)
     UpgradeProposal(u64),
 
+    /// Proposer recorded per upgrade proposal.
+    /// - Added as a separate key to preserve compatibility with older
+    ///   deployments that already store `UpgradeProposal(u64)` as a raw hash.
+    /// - Uses the same stable proposal identifier returned by `propose_upgrade`.
+    UpgradeProposalProposer(u64),
+
     /// Migration state tracking - prevents double migration
     /// - Set after successful migrate() call
     /// - Records from_version, to_version, timestamp, and migration_hash
@@ -742,6 +765,10 @@ impl GrainlifyContract {
             panic!("Already initialized");
         }
 
+        let caller = signers
+            .get(0)
+            .expect("multisig init requires at least one signer");
+
         // Initialize multisig configuration
         MultiSig::init(&env, signers, threshold);
         
@@ -749,7 +776,6 @@ impl GrainlifyContract {
         env.storage().instance().set(&DataKey::Version, &VERSION);
 
         // Track successful operation
-        let caller = Address::generate(&env);
         monitoring::track_operation(&env, symbol_short!("init"), caller.clone(), true);
 
         // Track performance
@@ -934,6 +960,16 @@ impl GrainlifyContract {
 
     /// Proposes an upgrade with a new WASM hash (multisig version).
     ///
+    /// # Proposal Lifecycle
+    /// 1. Allocates a fresh, monotonic proposal identifier from [`MultiSig`].
+    /// 2. Stores the upgrade metadata (`wasm_hash`, `proposer`) under that id.
+    /// 3. Returns the identifier for later calls to [`approve_upgrade`] and
+    ///    [`execute_upgrade`].
+    ///
+    /// Proposal identifiers are stable and never intentionally reused. This
+    /// function panics if a freshly allocated id would overwrite existing
+    /// upgrade metadata.
+    ///
     /// # Arguments
     /// * `env` - The contract environment
     /// * `proposer` - Address proposing the upgrade
@@ -942,11 +978,23 @@ impl GrainlifyContract {
     /// # Returns
     /// * `u64` - The proposal ID
     pub fn propose_upgrade(env: Env, proposer: Address, wasm_hash: BytesN<32>) -> u64 {
-        let proposal_id = MultiSig::propose(&env, proposer);
+        let proposal_id = MultiSig::propose(&env, proposer.clone());
+
+        if env.storage().instance().has(&DataKey::UpgradeProposal(proposal_id))
+            || env
+                .storage()
+                .instance()
+                .has(&DataKey::UpgradeProposalProposer(proposal_id))
+        {
+            panic!("duplicate upgrade proposal id");
+        }
 
         env.storage()
             .instance()
             .set(&DataKey::UpgradeProposal(proposal_id), &wasm_hash);
+        env.storage()
+            .instance()
+            .set(&DataKey::UpgradeProposalProposer(proposal_id), &proposer);
 
         proposal_id
     }
@@ -957,8 +1005,20 @@ impl GrainlifyContract {
     /// * `env` - The contract environment
     /// * `proposal_id` - The ID of the proposal to approve
     /// * `signer` - Address approving the proposal
+    ///
+    /// The `proposal_id` must be the stable identifier returned by
+    /// [`propose_upgrade`]. Approval state is maintained by [`MultiSig`].
     pub fn approve_upgrade(env: Env, proposal_id: u64, signer: Address) {
         MultiSig::approve(&env, proposal_id, signer);
+    }
+
+    /// Returns the upgrade proposal metadata stored for `proposal_id`.
+    ///
+    /// This view is intended for review tooling, off-chain auditors, and tests
+    /// that need to confirm which WASM hash and proposer are bound to a given
+    /// multisig proposal identifier.
+    pub fn get_upgrade_proposal(env: Env, proposal_id: u64) -> Option<UpgradeProposalRecord> {
+        Self::load_upgrade_proposal(&env, proposal_id)
     }
 
     /// Upgrades the contract to new WASM code.
@@ -1074,10 +1134,7 @@ impl GrainlifyContract {
             panic!("Threshold not met");
         }
 
-        let wasm_hash: BytesN<32> = env
-            .storage()
-            .instance()
-            .get(&DataKey::UpgradeProposal(proposal_id))
+        let proposal = Self::load_upgrade_proposal(&env, proposal_id)
             .expect("Missing upgrade proposal");
 
         // Store previous version for potential rollback
@@ -1088,19 +1145,36 @@ impl GrainlifyContract {
 
         // Perform WASM upgrade — instance storage is preserved
         env.deployer()
-            .update_current_contract_wasm(wasm_hash.clone());
+            .update_current_contract_wasm(proposal.wasm_hash.clone());
 
         // Emit structured upgrade event for off-chain indexers
         env.events().publish(
             (symbol_short!("upgrade"), symbol_short!("wasm")),
             UpgradeEvent {
-                new_wasm_hash: wasm_hash,
+                new_wasm_hash: proposal.wasm_hash,
                 version: current_version,
                 timestamp: env.ledger().timestamp(),
             },
         );
 
         MultiSig::mark_executed(&env, proposal_id);
+    }
+
+    fn load_upgrade_proposal(env: &Env, proposal_id: u64) -> Option<UpgradeProposalRecord> {
+        let wasm_hash = env
+            .storage()
+            .instance()
+            .get(&DataKey::UpgradeProposal(proposal_id))?;
+        let proposer = env
+            .storage()
+            .instance()
+            .get(&DataKey::UpgradeProposalProposer(proposal_id));
+
+        Some(UpgradeProposalRecord {
+            proposal_id,
+            proposer,
+            wasm_hash,
+        })
     }
 
     /// Upgrades the contract to new WASM code (single admin version).

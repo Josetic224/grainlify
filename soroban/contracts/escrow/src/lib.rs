@@ -11,82 +11,30 @@ pub use identity::*;
 
 mod reentrancy_guard;
 
-const MAX_LABELS: u32 = 10;
-const MAX_PAGE_SIZE: u32 = 20;
-const MAX_LABEL_LENGTH: u32 = 32;
-const ESCROW_LABELS_UPDATED: soroban_sdk::Symbol = soroban_sdk::symbol_short!("esc_lbl");
-const LABEL_CONFIG_UPDATED: soroban_sdk::Symbol = soroban_sdk::symbol_short!("lbl_cfg");
-
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LabelConfig {
-    pub restricted: bool,
-    pub allowed_labels: Vec<String>,
-}
-
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct EscrowLabelsUpdatedEvent {
-    pub version: u32,
-    pub bounty_id: u64,
-    pub actor: Address,
-    pub labels: Vec<String>,
-    pub timestamp: u64,
-}
-
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LabelConfigUpdatedEvent {
-    pub version: u32,
-    pub admin: Address,
-    pub restricted: bool,
-    pub allowed_labels: Vec<String>,
-    pub timestamp: u64,
-}
-
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct EscrowLabelRecord {
-    pub bounty_id: u64,
-    pub depositor: Address,
-    pub amount: i128,
-    pub remaining_amount: i128,
-    pub status: EscrowStatus,
-    pub deadline: u64,
-    pub labels: Vec<String>,
-}
-
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct EscrowLabelPage {
-    pub records: Vec<EscrowLabelRecord>,
-    pub next_cursor: Option<u64>,
-    pub has_more: bool,
-}
-
+use grainlify_core::errors;
 #[contracterror]
 #[derive(Clone, Debug, PartialEq)]
 #[repr(u32)]
 pub enum Error {
-    NotInitialized = 1,
-    AlreadyInitialized = 2,
-    BountyExists = 3,
-    BountyNotFound = 4,
-    FundsNotLocked = 5,
+    NotInitialized = 2,
+    AlreadyInitialized = 1,
+    BountyExists = 201,
+    BountyNotFound = 202,
+    FundsNotLocked = 203,
     DeadlineNotPassed = 6,
-    Unauthorized = 7,
-    InsufficientBalance = 8,
-    InvalidLabel = 9,
-    TooManyLabels = 10,
-    LabelNotAllowed = 11,
+    Unauthorized = 3,
+    InsufficientFunds = 5,
+    InvalidLabel = 226,
+    TooManyLabels = 227,
+    LabelNotAllowed = 228,
     // Identity-related errors
-    InvalidSignature = 100,
-    ClaimExpired = 101,
-    UnauthorizedIssuer = 102,
-    InvalidClaimFormat = 103,
-    TransactionExceedsLimit = 104,
-    InvalidRiskScore = 105,
-    InvalidTier = 106,
+    InvalidSignature = 301,
+    ClaimExpired = 302,
+    UnauthorizedIssuer = 303,
+    InvalidClaimFormat = 304,
+    TransactionExceedsLimit = 305,
+    InvalidRiskScore = 306,
+    InvalidTier = 307,
 }
 
 #[contracttype]
@@ -531,8 +479,7 @@ impl EscrowContract {
             return Err(Error::NotInitialized);
         }
         if amount <= 0 {
-            reentrancy_guard::release(&env);
-            return Err(Error::InsufficientBalance);
+            return Err(Error::InsufficientFunds);
         }
         if env.storage().persistent().has(&DataKey::Escrow(bounty_id)) {
             reentrancy_guard::release(&env);
@@ -653,7 +600,7 @@ impl EscrowContract {
             return Err(Error::FundsNotLocked);
         }
         if escrow.remaining_amount <= 0 {
-            return Err(Error::InsufficientBalance);
+            return Err(Error::InsufficientFunds);
         }
 
         // Enforce transaction limit for contributor
@@ -708,7 +655,7 @@ impl EscrowContract {
             return Err(Error::DeadlineNotPassed);
         }
         if escrow.remaining_amount <= 0 {
-            return Err(Error::InsufficientBalance);
+            return Err(Error::InsufficientFunds);
         }
 
         // EFFECTS: update state before external call (CEI)

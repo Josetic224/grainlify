@@ -1203,15 +1203,35 @@ impl GrainlifyContract {
     /// # State Preservation
     /// All instance storage is preserved across the WASM replacement.
     pub fn execute_upgrade(env: Env, proposal_id: u64) {
+        let start = env.ledger().timestamp();
+
+        // Security: Verify contract state is consistent before upgrade
+        if !monitoring::verify_invariants(&env) {
+            monitoring::track_operation(
+                &env, 
+                symbol_short!("execute_upgrade"), 
+                env.current_contract_address(), 
+                false
+            );
+            panic!("Contract state inconsistent - upgrade blocked");
+        }
+
+        // Verify proposal exists and has sufficient approvals
         if !MultiSig::can_execute(&env, proposal_id) {
-            panic!("Threshold not met");
+            monitoring::track_operation(
+                &env, 
+                symbol_short!("execute_upgrade"), 
+                env.current_contract_address(), 
+                false
+            );
+            panic!("Threshold not met or proposal not executable");
         }
 
         let proposal =
             Self::load_upgrade_proposal(&env, proposal_id).expect("Missing upgrade proposal");
 
-        // Store previous version for potential rollback
-        let current_version: u32 = env.storage().instance().get(&DataKey::Version).unwrap_or(1);
+        // Store previous version for rollback tracking
+        let current_version = env.storage().instance().get(&DataKey::Version).unwrap_or(1);
         env.storage()
             .instance()
             .set(&DataKey::PreviousVersion, &current_version);
@@ -1230,7 +1250,26 @@ impl GrainlifyContract {
             },
         );
 
+        // Mark proposal as executed (prevents re-execution)
         MultiSig::mark_executed(&env, proposal_id);
+
+        // Track successful operation
+        monitoring::track_operation(
+            &env, 
+            symbol_short!("execute_upgrade"), 
+            env.current_contract_address(), 
+            true
+        );
+
+        // Track performance
+        let duration = env.ledger().timestamp().saturating_sub(start);
+        monitoring::emit_performance(&env, symbol_short!("execute_upgrade"), duration);
+
+        // Emit upgrade execution event
+        env.events().publish(
+            (symbol_short!("upgrade_executed"),),
+            (proposal_id, wasm_hash, current_version),
+        );
     }
 
     fn load_upgrade_proposal(env: &Env, proposal_id: u64) -> Option<UpgradeProposalRecord> {
@@ -1791,6 +1830,62 @@ impl GrainlifyContract {
     /// Lightweight invariant verdict for frequent monitoring calls.
     pub fn verify_invariants(env: Env) -> bool {
         monitoring::verify_invariants(&env)
+    }
+
+    // ========================================================================
+    // Emergency Controls
+    // ========================================================================
+
+    /// Pause the contract (emergency function).
+    ///
+    /// # Arguments
+    /// * `env` - The contract environment
+    /// * `signer` - Address of the signer authorizing the pause
+    ///
+    /// # Security
+    /// - Only authorized multisig signers can pause
+    /// - Paused state blocks all critical operations including upgrades
+    ///
+    /// # Events
+    /// - Emits pause event with signer address
+    pub fn pause(env: Env, signer: Address) {
+        MultiSig::pause(&env, signer);
+    }
+
+    /// Unpause the contract.
+    ///
+    /// # Arguments
+    /// * `env` - The contract environment
+    /// * `signer` - Address of the signer authorizing the unpause
+    ///
+    /// # Security
+    /// - Only authorized multisig signers can unpause
+    /// - Restores normal contract operations
+    ///
+    /// # Events
+    /// - Emits unpause event with signer address
+    pub fn unpause(env: Env, signer: Address) {
+        MultiSig::unpause(&env, signer);
+    }
+
+    /// Check if contract is currently paused.
+    ///
+    /// # Returns
+    /// * `bool` - True if contract is paused, false otherwise
+    pub fn is_paused(env: Env) -> bool {
+        MultiSig::is_contract_paused(&env)
+    }
+
+    /// Check if a proposal can be executed.
+    ///
+    /// # Arguments
+    /// * `env` - The contract environment
+    /// * `proposal_id` - The ID of the proposal to check
+    ///
+    /// # Returns
+    /// * `bool` - True if proposal can be executed, false otherwise
+    pub fn can_execute(env: Env, proposal_id: u64) -> bool {
+        MultiSig::can_execute(&env, proposal_id)
     }
 
     // ========================================================================

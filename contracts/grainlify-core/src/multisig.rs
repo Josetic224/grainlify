@@ -13,6 +13,7 @@ enum DataKey {
     Config,
     Proposal(u64),
     ProposalCounter,
+    Paused,
 }
 
 /// =======================
@@ -51,6 +52,8 @@ pub enum MultiSigError {
     AlreadyExecuted,
     ThresholdNotMet,
     InvalidThreshold,
+    ContractPaused,
+    StateInconsistent,
 }
 
 /// =======================
@@ -137,6 +140,11 @@ impl MultiSig {
 
     /// Returns whether a proposal currently satisfies the execution threshold.
     pub fn can_execute(env: &Env, proposal_id: u64) -> bool {
+        // First check if contract is in a healthy state
+        if Self::is_contract_paused(env) || Self::is_state_inconsistent(env) {
+            return false;
+        }
+
         let config = Self::get_config(env);
         let proposal = Self::get_proposal(env, proposal_id);
 

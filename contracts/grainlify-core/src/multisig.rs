@@ -191,6 +191,41 @@ impl MultiSig {
         env.storage().instance().remove(&DataKey::Config);
     }
 
+    /// Pause multisig-controlled actions.
+    pub fn pause(env: &Env, signer: Address) {
+        signer.require_auth();
+
+        let config = Self::get_config(env);
+        Self::assert_signer(&config, &signer);
+
+        env.storage().instance().set(&DataKey::Paused, &true);
+        env.events().publish((symbol_short!("paused"),), signer);
+    }
+
+    /// Unpause multisig-controlled actions.
+    pub fn unpause(env: &Env, signer: Address) {
+        signer.require_auth();
+
+        let config = Self::get_config(env);
+        Self::assert_signer(&config, &signer);
+
+        env.storage().instance().set(&DataKey::Paused, &false);
+        env.events().publish((symbol_short!("unpaused"),), signer);
+    }
+
+    /// Returns whether the multisig control plane is paused.
+    pub fn is_contract_paused(env: &Env) -> bool {
+        env.storage().instance().get(&DataKey::Paused).unwrap_or(false)
+    }
+
+    /// Detects obviously invalid stored multisig state.
+    pub fn is_state_inconsistent(env: &Env) -> bool {
+        match Self::get_config_opt(env) {
+            Some(config) => config.threshold == 0 || config.threshold > config.signers.len() as u32,
+            None => false,
+        }
+    }
+
     /// =======================
     /// Internal Helpers
     /// =======================

@@ -147,3 +147,22 @@ See:
 - `contracts/escrow/src/test_auto_refund_permissions.rs`
 - `contracts/escrow/AUTO_REFUND_TESTS.md`
 - `SECURITY.md`
+
+## Reentrancy Assumptions
+
+The bounty escrow contract uses a shared instance-storage reentrancy flag for
+all state-changing entrypoints that may reach cross-contract interactions,
+especially SAC token transfers.
+
+- The guard is acquired before validation and released only after effects and
+  interactions complete successfully.
+- The same storage key is shared across protected functions, so re-entry into a
+  different payout path is blocked the same way as same-function recursion.
+- Checks-effects-interactions ordering still matters: escrow status and
+  remaining balances are written before token transfers.
+- Soroban rollback semantics are part of the security model. If an invocation
+  panics or returns an error that aborts the contract call, storage writes made
+  in that invocation, including the guard flag, are reverted.
+
+Focused coverage for this model lives in
+`contracts/escrow/src/test_reentrancy_guard.rs`.

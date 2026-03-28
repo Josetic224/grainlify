@@ -1568,7 +1568,7 @@ impl ProgramEscrowContract {
     }
 
     /// Returns the current admin address, if set.
-    pub fn get_admin(env: Env) -> Option<Address> {
+    pub fn get_program_admin(env: Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::Admin)
     }
 

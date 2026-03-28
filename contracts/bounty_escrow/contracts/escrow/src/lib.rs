@@ -369,7 +369,8 @@ mod anti_abuse {
         }
     }
 
-    pub fn get_admin(env: &Env) -> Option<Address> {
+    /// Returns the current admin address, if set.
+    pub fn get_escrow_admin(env: &Env) -> Option<Address> {
         env.storage().instance().get(&AntiAbuseKey::Admin)
     }
 
@@ -498,7 +499,7 @@ pub mod rbac {
     /// Returns `true` if `addr` is the stored anti-abuse (operator) admin.
     pub fn is_operator(env: &Env, addr: &Address) -> bool {
         use crate::anti_abuse;
-        anti_abuse::get_admin(env)
+        anti_abuse::get_escrow_admin(env)
             .map(|a| &a == addr)
             .unwrap_or(false)
     }

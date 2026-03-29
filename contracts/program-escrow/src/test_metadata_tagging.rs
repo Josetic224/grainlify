@@ -3,7 +3,7 @@ extern crate std;
 
 use crate::*;
 use soroban_sdk::{
-    testutils::{Address as _, Events},
+    testutils::Address as _,
     token, Address, Env, String, Vec as SdkVec,
 };
 
@@ -95,13 +95,13 @@ fn test_query_programs_by_type() {
     let s = Setup::new();
 
     // Create programs with different types
-    let program_types = vec!["hackathon", "grant", "hackathon", "bounty_program"];
+    let program_types = ["hackathon", "grant", "hackathon", "bounty_program"];
 
     for (i, prog_type) in program_types.iter().enumerate() {
-        let program_id = String::from_str(&s.env, &format!("Program{}", i + 1));
+        let program_id = String::from_str(&s.env, &std::format!("Program{}", i + 1));
 
         let metadata = ProgramMetadata {
-            program_name: Some(String::from_str(&s.env, &format!("Program {}", i + 1))),
+            program_name: Some(String::from_str(&s.env, &std::format!("Program {}", i + 1))),
             program_type: Some(String::from_str(&s.env, prog_type)),
             ecosystem: Some(String::from_str(&s.env, "stellar")),
             tags: SdkVec::new(&s.env),
@@ -116,7 +116,7 @@ fn test_query_programs_by_type() {
             &s.token.address,
             &s.organizer,
             &None,
-            &metadata,
+            &Some(metadata.clone()),
         );
     }
 
@@ -141,13 +141,13 @@ fn test_query_programs_by_ecosystem() {
     let s = Setup::new();
 
     // Create programs in different ecosystems
-    let ecosystems = vec!["stellar", "ethereum", "stellar", "polkadot"];
+    let ecosystems = ["stellar", "ethereum", "stellar", "polkadot"];
 
     for (i, ecosystem) in ecosystems.iter().enumerate() {
-        let program_id = String::from_str(&s.env, &format!("Program{}", i + 1));
+        let program_id = String::from_str(&s.env, &std::format!("Program{}", i + 1));
 
         let metadata = ProgramMetadata {
-            program_name: Some(String::from_str(&s.env, &format!("Program {}", i + 1))),
+            program_name: Some(String::from_str(&s.env, &std::format!("Program {}", i + 1))),
             program_type: Some(String::from_str(&s.env, "hackathon")),
             ecosystem: Some(String::from_str(&s.env, ecosystem)),
             tags: SdkVec::new(&s.env),
@@ -162,7 +162,7 @@ fn test_query_programs_by_ecosystem() {
             &s.token.address,
             &s.organizer,
             &None,
-            &metadata,
+            &Some(metadata.clone()),
         );
     }
 
@@ -182,7 +182,7 @@ fn test_query_programs_by_tags() {
 
     // Create programs with different tags
     for i in 1u32..=6 {
-        let program_id = String::from_str(&s.env, &format!("Program{}", i));
+        let program_id = String::from_str(&s.env, &std::format!("Program{}", i));
 
         let mut tags = SdkVec::new(&s.env);
         if i % 2 == 0 {
@@ -193,7 +193,7 @@ fn test_query_programs_by_tags() {
         }
 
         let metadata = ProgramMetadata {
-            program_name: Some(String::from_str(&s.env, &format!("Program {}", i))),
+            program_name: Some(String::from_str(&s.env, &std::format!("Program {}", i))),
             program_type: Some(String::from_str(&s.env, "hackathon")),
             ecosystem: Some(String::from_str(&s.env, "stellar")),
             tags,
@@ -208,7 +208,7 @@ fn test_query_programs_by_tags() {
             &s.token.address,
             &s.organizer,
             &None,
-            &metadata,
+            &Some(metadata.clone()),
         );
     }
 
@@ -253,7 +253,7 @@ fn test_metadata_persists_through_lifecycle() {
         &s.token.address,
         &s.organizer,
         &Some(prize_pool),
-        &metadata,
+        &Some(metadata.clone()),
     );
 
     // Verify metadata after initialization
@@ -270,7 +270,7 @@ fn test_metadata_persists_through_lifecycle() {
     let mut amounts = SdkVec::new(&s.env);
     amounts.push_back(5_000_0000000i128);
 
-    s.escrow.batch_payout(&program_id, &winners, &amounts);
+    s.escrow.batch_payout(&winners, &amounts);
 
     // Verify metadata persists after payout
     let after_payout = s.escrow.get_program_metadata(&program_id);
@@ -325,7 +325,7 @@ fn test_program_custom_fields() {
         &s.token.address,
         &s.organizer,
         &None,
-        &metadata,
+        &Some(metadata.clone()),
     );
 
     // Retrieve and verify custom fields

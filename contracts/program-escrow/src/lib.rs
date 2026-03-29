@@ -699,7 +699,7 @@ pub struct ProgramAggregateStats {
     pub released_count: u32,
 }
 
-use grainlify_core::errors;
+
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1166,7 +1166,7 @@ impl ProgramEscrowContract {
 
         let mut program_data = Self::initialize_program(
             env.clone(),
-            program_id,
+            program_id.clone(),
             authorized_payout_key,
             token_address,
             creator,
@@ -2006,7 +2006,8 @@ impl ProgramEscrowContract {
         let mut program_data = Self::get_program_data_by_id(&env, &program_id);
         let revoked_by = Self::require_program_owner_or_admin(&env, &program_data, &caller);
 
-        program_data.metadata = metadata;
+        program_data.delegate = None;
+        program_data.delegate_permissions = 0;
         Self::store_program_data(&env, &program_id, &program_data);
 
         env.events().publish(
